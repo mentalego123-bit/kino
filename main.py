@@ -14,7 +14,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramBadRequest
 
 # ================= SOZLAMALAR =================
-BOT_TOKEN = "8998624190:AAGMbIYyTE7uCKlkQZOcGRdyoy9g4UnGAro"
+BOT_TOKEN = "8998624190:AAHH0e5kQN4Rjpq4uHzz7GaY4KeEzRoPqTc"
 MAIN_ADMIN_ID = 8355669630
 ADMIN_USERNAME = "smart_gemini"
 DB_PATH = "kino_bot.db"   # eski baza fayli shu nom bilan bo'lsa, o'sha bilan ishlaydi
