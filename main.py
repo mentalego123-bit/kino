@@ -10,12 +10,28 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from fpdf import FPDF
 
+# ================= FIREBASE UCHUN QO'SHILDI =================
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import db
+
 # ================= SOZLAMALAR =================
 BOT_TOKEN = "8998624190:AAGMbIYyTE7uCKlkQZOcGRdyoy9g4UnGAro" 
 MAIN_ADMIN_ID = 8355669630
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
+# ================= FIREBASE BAZANI ULAHS =================
+# "path/to/serviceAccountKey.json" o'rniga yuklab olingan maxfiy kalit faylingiz nomini yozing
+try:
+    cred = credentials.Certificate("path/to/serviceAccountKey.json")
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': 'https://dowload-6c855-default-rtdb.firebaseio.com'
+    })
+    print("✅ Firebase bazasiga muvaffaqiyatli ulandi!")
+except Exception as e:
+    print(f"❌ Firebase'ga ulanishda xatolik: {e}")
 
 # ================= FSM HOLATLAR (KUTISH) =================
 class AdminState(StatesGroup):
