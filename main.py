@@ -74,9 +74,9 @@ def init_db():
     
     # AVTOMATIK YOPIQ KANALLARNI BAZAGA QO'SHISH (DIQQAT: ID LARNI O'ZGARTIRING!)
     cursor.execute("INSERT OR IGNORE INTO channels (channel_id, url, name) VALUES (?, ?, ?)", 
-                   ("-100_KIRITING_1", "https://t.me/+t30YnzAM5iFlNGVk", "1-Kanal (Yopiq)"))
+                   ("-1004464851017", "https://t.me/+t30YnzAM5iFlNGVk", "1-Kanal (Yopiq)"))
     cursor.execute("INSERT OR IGNORE INTO channels (channel_id, url, name) VALUES (?, ?, ?)", 
-                   ("-100_KIRITING_2", "https://t.me/+igbljkrdLqwwNzk0", "2-Kanal (Yopiq)"))
+                   ("-1003767593017", "https://t.me/+igbljkrdLqwwNzk0", "2-Kanal (Yopiq)"))
     
     conn.commit()
     conn.close()
