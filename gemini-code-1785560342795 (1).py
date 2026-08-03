@@ -11,7 +11,7 @@ from fpdf import FPDF
 from aiohttp import web
 
 # ================= SOZLAMALAR =================
-BOT_TOKEN = "8998624190:AAGMbIYyTE7uCKlkQZOcGRdyoy9g4UnGAro" 
+BOT_TOKEN = "8998624190:AAHWIIJW4pr3Hk2jRw_d0Ll6fVF4lwr7_4s" 
 MAIN_ADMIN_ID = 8355669630
 
 bot = Bot(token=BOT_TOKEN)
