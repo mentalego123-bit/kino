@@ -39,7 +39,7 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, joined_date TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS admins (id INTEGER PRIMARY KEY)''')
     
-    # KINOLAR JADVALI (YANGI QATORLAR QO'SHILDI: is_paid, price)
+    # KINOLAR JADVALI
     cursor.execute('''CREATE TABLE IF NOT EXISTS movies (
         code TEXT PRIMARY KEY, 
         file_id TEXT, 
@@ -51,7 +51,6 @@ def init_db():
         price INTEGER DEFAULT 0
     )''')
     
-    # Eski baza mavjud bo'lsa, xato bermasligi uchun yangi ustunlarni qo'shib tekshiramiz
     try:
         cursor.execute("ALTER TABLE movies ADD COLUMN is_paid INTEGER DEFAULT 0")
         cursor.execute("ALTER TABLE movies ADD COLUMN price INTEGER DEFAULT 0")
@@ -62,10 +61,19 @@ def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS favorites (user_id INTEGER, movie_code TEXT, UNIQUE(user_id, movie_code))''')
     
+    # SO'ROV YUBORGANLARNI SAQLASH UCHUN YANGI JADVAL
+    cursor.execute('''CREATE TABLE IF NOT EXISTS join_requests (user_id INTEGER, channel_id TEXT, UNIQUE(user_id, channel_id))''')
+    
     cursor.execute("INSERT OR IGNORE INTO admins (id) VALUES (?)", (MAIN_ADMIN_ID,))
     
-    default_text = "Botdan to'liq foydalanish va kinolarni ko'rish uchun quyidagi kanallarga obuna bo'lishingiz shart!"
+    default_text = "Botdan to'liq foydalanish va kinolarni ko'rish uchun quyidagi kanallarga obuna bo'lishingiz yoki so'rov yuborishingiz shart!"
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('sub_text', ?)", (default_text,))
+    
+    # AVTOMATIK YOPIQ KANALLARNI BAZAGA QO'SHISH (DIQQAT: ID LARNI O'ZGARTIRING!)
+    cursor.execute("INSERT OR IGNORE INTO channels (channel_id, url, name) VALUES (?, ?, ?)", 
+                   ("-1004464851017", "https://t.me/+t30YnzAM5iFlNGVk", "1-Kanal (Yopiq)"))
+    cursor.execute("INSERT OR IGNORE INTO channels (channel_id, url, name) VALUES (?, ?, ?)", 
+                   ("-1003767593017", "https://t.me/+igbljkrdLqwwNzk0", "2-Kanal (Yopiq)"))
     
     conn.commit()
     conn.close()
@@ -78,21 +86,41 @@ def is_admin(user_id):
     conn.close()
     return bool(admin)
 
-# ================= MAJBURIY OBUNA =================
+# ================= JOIN REQUEST (SO'ROVLARNI) TUTISH =================
+@dp.chat_join_request()
+async def join_request_handler(update: types.ChatJoinRequest):
+    conn = sqlite3.connect("kino_bot.db")
+    cursor = conn.cursor()
+    # So'rov yuborgan foydalanuvchini bazaga saqlaymiz
+    cursor.execute("INSERT OR IGNORE INTO join_requests (user_id, channel_id) VALUES (?, ?)", 
+                   (update.from_user.id, str(update.chat.id)))
+    conn.commit()
+    conn.close()
+
+# ================= MAJBURIY OBUNA VA SO'ROV TEKSHIRISH =================
 async def get_sub_markup(user_id):
     conn = sqlite3.connect("kino_bot.db")
     cursor = conn.cursor()
     cursor.execute("SELECT channel_id, url, name FROM channels")
     channels = cursor.fetchall()
+    
+    # Qaysi kanallarga so'rov yuborganini olamiz
+    cursor.execute("SELECT channel_id FROM join_requests WHERE user_id=?", (user_id,))
+    requested_channels = [row[0] for row in cursor.fetchall()]
     conn.close()
     
     unsubscribed = []
     for ch_id, url, name in channels:
+        # Agar so'rov yuborganlar ruyxatida bo'lsa, tekshiruvdan muvaffaqiyatli o'tadi
+        if str(ch_id) in requested_channels:
+            continue
+            
         try:
             member = await bot.get_chat_member(chat_id=ch_id, user_id=user_id)
             if member.status in ['left', 'kicked']:
                 unsubscribed.append((name, url))
         except Exception:
+            unsubscribed.append((name, url))
             continue
             
     if not unsubscribed:
@@ -101,7 +129,7 @@ async def get_sub_markup(user_id):
     markup = InlineKeyboardMarkup(inline_keyboard=[])
     for name, url in unsubscribed:
         markup.inline_keyboard.append([InlineKeyboardButton(text=f"📢 {name}", url=url)])
-    markup.inline_keyboard.append([InlineKeyboardButton(text="✅ Obuna bo'ldim", callback_data="check_sub")])
+    markup.inline_keyboard.append([InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="check_sub")])
     return markup
 
 # ================= ASOSIY MENYU =================
@@ -139,7 +167,7 @@ async def start_cmd(message: types.Message):
 async def check_sub_callback(callback: types.CallbackQuery):
     markup = await get_sub_markup(callback.from_user.id)
     if markup:
-        await callback.answer("Siz hamma kanallarga obuna bo'lmagansiz!", show_alert=True)
+        await callback.answer("❌ Barcha kanallarga obuna bo'lmagansiz yoki so'rov yubormagansiz!", show_alert=True)
     else:
         await callback.message.delete()
         await callback.message.answer("Assalomu aleykum, kino kodini orqali qidiring 👇", reply_markup=main_menu())
@@ -149,7 +177,7 @@ async def check_sub_callback(callback: types.CallbackQuery):
 async def search_movie(message: types.Message):
     markup = await get_sub_markup(message.from_user.id)
     if markup:
-        await message.answer("Avval kanallarga obuna bo'ling!", reply_markup=markup)
+        await message.answer("❌ Funksiyalardan foydalanish uchun avval kanallarga obuna bo'ling (yoki so'rov yuboring)!", reply_markup=markup)
         return
 
     code = message.text.strip()
@@ -160,7 +188,7 @@ async def search_movie(message: types.Message):
     
     if not movie:
         conn.close()
-        await message.answer("Unday kino topilmadi iltimos @kinolaruzhub dan qidirb ko'ring.")
+        await message.answer("Unday kino topilmadi iltimos qidirb ko'ring.")
         return
 
     cursor.execute("UPDATE movies SET views = views + 1 WHERE code=?", (code,))
@@ -169,7 +197,6 @@ async def search_movie(message: types.Message):
 
     file_id, msg_type, caption, is_paid, price = movie
     
-    # PULLIK KINO TEKSHIRUVI
     if is_paid:
         await message.answer(
             f"🔒 <b>Bu pullik kino!</b>\n\n"
@@ -194,6 +221,11 @@ async def search_movie(message: types.Message):
 # --- YANGI FUNKSIYALAR: TOP VA YANGI KINOLAR ---
 @dp.message(StateFilter(None), F.text == "🔥 Top kinolar")
 async def top_movies(message: types.Message):
+    markup = await get_sub_markup(message.from_user.id)
+    if markup:
+        await message.answer("❌ Avval kanallarga obuna bo'ling (yoki so'rov yuboring)!", reply_markup=markup)
+        return
+
     conn = sqlite3.connect("kino_bot.db")
     cursor = conn.cursor()
     cursor.execute("SELECT code, caption, views, is_paid FROM movies ORDER BY views DESC LIMIT 10")
@@ -214,6 +246,11 @@ async def top_movies(message: types.Message):
 
 @dp.message(StateFilter(None), F.text == "🆕 Yangi kinolar")
 async def latest_movies(message: types.Message):
+    markup = await get_sub_markup(message.from_user.id)
+    if markup:
+        await message.answer("❌ Avval kanallarga obuna bo'ling (yoki so'rov yuboring)!", reply_markup=markup)
+        return
+
     conn = sqlite3.connect("kino_bot.db")
     cursor = conn.cursor()
     cursor.execute("SELECT code, caption, is_paid FROM movies ORDER BY added_date DESC LIMIT 5")
@@ -250,6 +287,11 @@ async def add_to_favorites(callback: types.CallbackQuery):
 
 @dp.message(StateFilter(None), F.text == "❤️ Sevimlilar")
 async def show_favorites(message: types.Message):
+    markup = await get_sub_markup(message.from_user.id)
+    if markup:
+        await message.answer("❌ Avval kanallarga obuna bo'ling (yoki so'rov yuboring)!", reply_markup=markup)
+        return
+
     conn = sqlite3.connect("kino_bot.db")
     cursor = conn.cursor()
     cursor.execute("SELECT movie_code FROM favorites WHERE user_id=?", (message.from_user.id,))
@@ -268,6 +310,11 @@ async def show_favorites(message: types.Message):
 
 @dp.message(StateFilter(None), F.text == "🎲 Tasodifiy kino")
 async def random_movie(message: types.Message):
+    markup = await get_sub_markup(message.from_user.id)
+    if markup:
+        await message.answer("❌ Avval kanallarga obuna bo'ling (yoki so'rov yuboring)!", reply_markup=markup)
+        return
+
     conn = sqlite3.connect("kino_bot.db")
     cursor = conn.cursor()
     cursor.execute("SELECT code FROM movies WHERE is_paid=0 ORDER BY RANDOM() LIMIT 1")
@@ -297,10 +344,9 @@ async def admin_panel(message: types.Message):
     ])
     await message.answer("👨‍💻 <b>Boshqaruv paneli (Admin)</b>", reply_markup=markup, parse_mode="HTML")
 
-# --- KINO YUKLASH (PULLIK/BEPUL) ---
 @dp.callback_query(F.data == "adm_add_movie")
 async def add_movie_step1(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("1️⃣ <b>Kinoni yuboring</b> (Boshqa kanaldan forward qilsangiz ham bo'ladi):", parse_mode="HTML")
+    await callback.message.answer("1️⃣ <b>Kinoni yuboring</b>:", parse_mode="HTML")
     await state.set_state(AdminState.waiting_for_movie)
 
 @dp.message(AdminState.waiting_for_movie, F.video | F.document | F.photo)
@@ -314,7 +360,7 @@ async def add_movie_step2(message: types.Message, state: FSMContext):
         file_id, msg_type = message.photo[-1].file_id, "photo"
 
     await state.update_data(file_id=file_id, type=msg_type)
-    await message.answer("2️⃣ <b>Kino kodini kiriting</b> (Faqat raqamlar, masalan: 125):", parse_mode="HTML")
+    await message.answer("2️⃣ <b>Kino kodini kiriting</b>:", parse_mode="HTML")
     await state.set_state(AdminState.waiting_for_movie_code)
 
 @dp.message(AdminState.waiting_for_movie_code)
@@ -335,7 +381,7 @@ async def add_movie_step3(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="🆓 Bepul kino", callback_data="type_free"),
          InlineKeyboardButton(text="💰 Pullik kino", callback_data="type_paid")]
     ])
-    await message.answer("3️⃣ <b>Kino turini belgilang:</b>\nBu kino bepul bo'ladimi yoki pullik?", reply_markup=markup, parse_mode="HTML")
+    await message.answer("3️⃣ <b>Kino turini belgilang:</b>", reply_markup=markup, parse_mode="HTML")
     await state.set_state(AdminState.waiting_for_is_paid)
 
 @dp.callback_query(AdminState.waiting_for_is_paid, F.data.in_(["type_free", "type_paid"]))
@@ -343,11 +389,11 @@ async def add_movie_is_paid(callback: types.CallbackQuery, state: FSMContext):
     if callback.data == "type_free":
         await state.update_data(is_paid=0, price=0)
         markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="O'tkazib yuborish")]], resize_keyboard=True)
-        await callback.message.answer("4️⃣ <b>Kino tavsifini yozing</b> (Yoki \"O'tkazib yuborish\" ni bosing):", parse_mode="HTML", reply_markup=markup)
+        await callback.message.answer("4️⃣ <b>Kino tavsifini yozing</b>:", parse_mode="HTML", reply_markup=markup)
         await state.set_state(AdminState.waiting_for_movie_caption)
     else:
         await state.update_data(is_paid=1)
-        await callback.message.answer("💸 <b>Kino narxini kiriting</b> (Faqat raqamlarda, masalan: 5000):", parse_mode="HTML")
+        await callback.message.answer("💸 <b>Kino narxini kiriting</b>:", parse_mode="HTML")
         await state.set_state(AdminState.waiting_for_price)
 
 @dp.message(AdminState.waiting_for_price)
@@ -358,7 +404,7 @@ async def add_movie_price(message: types.Message, state: FSMContext):
         
     await state.update_data(price=int(message.text))
     markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="O'tkazib yuborish")]], resize_keyboard=True)
-    await message.answer("4️⃣ <b>Kino tavsifini yozing</b> (Yoki \"O'tkazib yuborish\" ni bosing):", parse_mode="HTML", reply_markup=markup)
+    await message.answer("4️⃣ <b>Kino tavsifini yozing</b>:", parse_mode="HTML", reply_markup=markup)
     await state.set_state(AdminState.waiting_for_movie_caption)
 
 @dp.message(AdminState.waiting_for_movie_caption)
@@ -378,7 +424,6 @@ async def add_movie_step4(message: types.Message, state: FSMContext):
     await message.answer(f"🎉 Kino bazaga muvaffaqiyatli saqlandi!\nKodi: <code>{data['code']}</code>\nStatusi: {status_text}", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     await state.clear()
 
-# --- KINOLARNI BOSHQARISH VA O'CHIRISH ---
 @dp.callback_query(F.data == "adm_manage_movies")
 async def manage_movies(callback: types.CallbackQuery, state: FSMContext):
     conn = sqlite3.connect("kino_bot.db")
@@ -426,11 +471,10 @@ async def delete_movie(message: types.Message, state: FSMContext):
         conn.commit()
         await message.answer(f"✅ <b>{code}</b> kodli kino bazadan o'chirildi!", parse_mode="HTML")
     else:
-        await message.answer("❌ Bunday kodli kino topilmadi. Qaytadan urinib ko'ring yoki /cancel ni bosing.")
+        await message.answer("❌ Bunday kodli kino topilmadi.")
     conn.close()
     await state.clear()
 
-# --- MAJBURIY OBUNA ---
 @dp.callback_query(F.data == "adm_sub_menu")
 async def sub_menu(callback: types.CallbackQuery):
     conn = sqlite3.connect("kino_bot.db")
@@ -496,7 +540,6 @@ async def add_channel_step3(message: types.Message, state: FSMContext):
         await message.answer("❌ Xato! Format: Nomi|Link bo'lishi kerak.")
     await state.clear()
 
-# --- STATISTIKA ---
 @dp.callback_query(F.data == "adm_stats_text")
 async def show_stats(callback: types.CallbackQuery):
     conn = sqlite3.connect("kino_bot.db")
@@ -529,10 +572,9 @@ async def show_stats_pdf(callback: types.CallbackQuery):
     await bot.send_document(chat_id=callback.from_user.id, document=FSInputFile(pdf_name))
     os.remove(pdf_name)
 
-# --- XABAR TARQATISH ---
 @dp.callback_query(F.data == "adm_broadcast")
 async def broadcast_start(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("📝 Tarqatmoqchi bo'lgan xabarni yuboring (Rasm, matn, video, ovozli xabar):")
+    await callback.message.answer("📝 Tarqatmoqchi bo'lgan xabarni yuboring:")
     await state.set_state(AdminState.waiting_for_broadcast)
 
 @dp.message(AdminState.waiting_for_broadcast)
@@ -547,7 +589,6 @@ async def broadcast_send(message: types.Message, state: FSMContext):
     
     for (user_id,) in users:
         try:
-            # message.copy_to() funksiyasi har qanday turdagi xabarni xatosiz yetkazib beradi
             await message.copy_to(chat_id=user_id)
             success += 1
             await asyncio.sleep(0.05)
@@ -557,7 +598,6 @@ async def broadcast_send(message: types.Message, state: FSMContext):
     await msg.edit_text(f"✅ Yakunlandi!\nBordi: {success}\nBlok qilganlar: {fail}")
     await state.clear()
 
-# --- ADMIN QO'SHISH ---
 @dp.callback_query(F.data == "adm_manage_admins")
 async def manage_admins(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != MAIN_ADMIN_ID:
@@ -590,19 +630,15 @@ async def web_server():
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.AppRunner(app) # yoki web.TCPSite, lekin oddiy usulda:
     
-    # Render o'zi beradigan portni oladi
     port = int(os.environ.get("PORT", 10000))
     tcpsite = web.TCPSite(runner, "0.0.0.0", port)
     await tcpsite.start()
 
-# Asosiy main funksiyaga veb-serverni ham qo'shamiz
 async def main():
     init_db()
     print("🚀 Barcha bazalar tekshirildi, Bot ishga tushdi...")
     
-    # Veb serverni fonda ishga tushirish
     asyncio.create_task(web_server())
     
     await dp.start_polling(bot)
